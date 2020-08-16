@@ -156,7 +156,7 @@
 
 			// authorize a new public key to sign transfers and withdrawals
 			{
-				if: `{trigger.data.authorize_key AND trigger.data.pubkey}`,
+				if: `{trigger.data.authorize AND trigger.data.pubkey}`,
 				init: `{
 					if (length(trigger.data.pubkey) > 1000)
 						bounce("pubkey is too long");
@@ -172,7 +172,7 @@
 
 			// revoke a previously authorized public key
 			{
-				if: `{trigger.data.authorize_key AND trigger.data.pubkey}`,
+				if: `{trigger.data.revoke AND trigger.data.pubkey}`,
 				init: `{
 					if (length(trigger.data.pubkey) > 1000)
 						bounce("pubkey is too long");

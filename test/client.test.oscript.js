@@ -18,14 +18,10 @@ describe('A client AA uses the bank in order to buffer the payments to AA addres
 			.with.asset({ cherries: { /*cap: 1e15*/ } })
 			.with.wallet({ alice: {base: 100e9, cherries: 100e9} })
 			.with.wallet({ user1: 0 })
-		//	.with.wallet({ user2: 0 })
-		//	.with.wallet({ user3: 0 })
 			.run()
 		this.alice = this.network.wallet.alice
 		this.aliceAddress = await this.alice.getAddress()
 		this.user1Address = await this.network.wallet.user1.getAddress()
-	//	this.user2Address = await this.network.wallet.user2.getAddress()
-	//	this.user3Address = await this.network.wallet.user3.getAddress()
 		this.cherriesAsset = this.network.asset.cherries
 		this.bank_aa = this.network.agent.bank
 		this.client_aa = this.network.agent.client
@@ -34,11 +30,30 @@ describe('A client AA uses the bank in order to buffer the payments to AA addres
 		this.withdrawal_fee = 2000
 	})
 
-	it('Alice sends cherries to the client AA which forwards them to users', async () => {
+	it('Alice deposits 10000 bytes to the bank to make sure it has enough bytes for storage fees', async () => {
+		const amount = 10000
+		const { unit, error } = await this.alice.sendBytes({
+			toAddress: this.bank_aa,
+			amount: amount,
+		})
+
+		expect(error).to.be.null
+		expect(unit).to.be.validUnit
+
+		const { response } = await this.network.getAaResponseToUnitOnNode(this.alice, unit)
+		expect(response.response.error).to.be.undefined
+		expect(response.bounced).to.be.false
+		expect(response.response_unit).to.be.null
+
+		const { vars } = await this.alice.readAAStateVars(this.bank_aa)
+		console.log(vars)
+		expect(vars['balance_' + this.aliceAddress + '_base']).to.be.equal(amount)
+	})
+
+	it('Alice sends cherries to the client AA which forwards them to users and AAs', async () => {
 		const amount1 = 1e9
 		const amount2 = 2e9
 		const amount3 = 3e9
-		console.log('____________')
 
 		const { unit, error } = await this.alice.sendMulti({
 			asset: this.cherriesAsset,

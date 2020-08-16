@@ -1,6 +1,6 @@
 {
 	init: `{
-		$bank_aa = 'GWWFK3LBSMOYW5TUTI7K3XCZ5U7525JW';
+		$bank_aa = 'I24IBMUUZPRNBJTK7U2QMEXUFP7QPL7W';
 		
 		$payments = [
 			{

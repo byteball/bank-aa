@@ -91,8 +91,8 @@ describe('Getter function', function () {
 						const payment_messages = []
 						for (let asset in assocPaymentMessages)
 							payment_messages.push(assocPaymentMessages[asset])
-						console.log(JSON.stringify(payment_messages, null, '\t'))
-						console.log(JSON.stringify(buffer_recipients, null, '\t'))
+					//	console.log(JSON.stringify(payment_messages, null, '\t'))
+					//	console.log(JSON.stringify(buffer_recipients, null, '\t'))
 
 						const { result, error: getterError } = await this.alice.executeGetter({
 							aaAddress: this.bank_aa,
