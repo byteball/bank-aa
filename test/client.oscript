@@ -1,0 +1,50 @@
+{
+	init: `{
+		$bank_aa = 'GWWFK3LBSMOYW5TUTI7K3XCZ5U7525JW';
+		
+		$payments = [
+			{
+				address: trigger.data.address1,
+				asset: trigger.data.asset1,
+				amount: trigger.data.amount1,
+			},
+			{
+				address: trigger.data.address2,
+				asset: trigger.data.asset2,
+				amount: trigger.data.amount2,
+			},
+			{
+				address: trigger.data.address3,
+				asset: trigger.data.asset3,
+				amount: trigger.data.amount3,
+			},
+		];
+		foreach($payments, 3, ($i, $payment) => {
+			$payments[$i].is_aa = is_aa($payment.address);
+		});
+		$res = $bank_aa.$get_payment_messages($payments);
+
+		$payment_messages = $res.payment_messages;
+		$buffer_recipients = $res.buffer_recipients;
+
+	}`,
+	messages: [
+		`{$payment_messages[0] OTHERWISE ''}`,
+		`{$payment_messages[1] OTHERWISE ''}`,
+		`{$payment_messages[2] OTHERWISE ''}`,
+		`{$payment_messages[3] OTHERWISE ''}`,
+		{
+			if: `{length($buffer_recipients)}`,
+			app: 'data',
+			payload: {
+				recipients: `{$buffer_recipients}`
+			}
+		},
+		{
+			app: 'state',
+			state: `{
+
+			}`
+		}
+	]
+}

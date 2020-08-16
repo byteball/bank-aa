@@ -1,0 +1,306 @@
+{
+	doc_url: "https://obyte.org/bank.json",
+	getters: `{
+		$storage_fee = 100;
+			foreach([8], 10, $payment_message => {
+				$x = var['k'];
+			});
+			delete($storage_fee, 3);
+
+		$_parse_payment_messages = ($payments) => {
+			$payment_messages_by_asset = {};
+			$buffer_recipients = [];
+			$totals = {base: 0};
+			$min_base_payment = $storage_fee * length($payments);
+			foreach($payments, 100, $payment => {
+				if ($payment.amount == 0)
+					return;
+				if ($payment.is_aa){
+					delete($payment, 'is_aa');
+					$buffer_recipients[] = $payment;
+					$address = this_address;
+					if ($payment.asset == 'base')
+						$totals.base = $totals.base + $payment.amount;
+					$amount = ($payment.asset == 'base' AND $payment.amount < $min_base_payment) ? $min_base_payment : $payment.amount;
+				}
+				else{
+					$address = $payment.address;
+					$amount = $payment.amount;
+				}
+				if ($payment_messages_by_asset[$payment.asset])
+					$payment_messages_by_asset[$payment.asset].payload.outputs[] = {address: $address, amount: $amount};
+				else
+					$payment_messages_by_asset[$payment.asset] = {
+						app: 'payment',
+						payload: {
+							asset: $payment.asset,
+							outputs: [
+								{address: $address, amount: $amount}
+							]
+						}
+					};
+			});
+			{
+				payment_messages_by_asset: $payment_messages_by_asset,
+				buffer_recipients: $buffer_recipients,
+				base_amount: $totals.base,
+			}
+		};
+
+		$get_payment_messages = ($payments) => {
+			$res = $_parse_payment_messages($payments);
+			$payment_messages_by_asset = $res.payment_messages_by_asset;
+			$buffer_recipients = $res.buffer_recipients;
+			$base_amount = $res.base_amount;
+
+			if (length($buffer_recipients) > 0 AND $base_amount == 0){
+				$min_base_payment = $storage_fee * length($buffer_recipients);
+				$output = {address: this_address, amount: $min_base_payment};
+				if ($payment_messages_by_asset['base'])
+					$payment_messages_by_asset['base'].payload.outputs[] = $output;
+				else
+					$payment_messages_by_asset['base'] = {
+						app: 'payment',
+						payload: {
+							asset: 'base',
+							outputs: [
+								$output
+							]
+						}
+					};
+			}
+			$payment_messages = [];
+			foreach($payment_messages_by_asset, 100, $payment_message => {
+				$payment_messages[] = $payment_message;
+			});
+			{
+				payment_messages: $payment_messages,
+				buffer_recipients: $buffer_recipients,
+			}
+		};
+
+	}`,
+	init: `{
+		$withdrawal_fee = 1000;
+
+		if (exists(trigger.data.to) AND !is_valid_address(trigger.data.to))
+			bounce("bad to-address");
+
+		$get_amount = ($amount, $balance) => {
+			if ($amount == 'all')
+				return $balance;
+			if (!is_integer($amount) OR $amount <= 0)
+				bounce("bad amount: " || $amount);
+			$amount
+		};
+
+		// a command to transfer or withdraw can be signed by an authorized key and submitted by anybody
+		$get_owner = ($message_to_sign) => {
+			if (!trigger.data.owner)
+				return trigger.address;
+			if (!trigger.data.pubkey)
+				bounce("no pubkey");
+			if (!trigger.data.signature)
+				bounce("no signature");
+			if (!trigger.data.nonce) // to avoid replay
+				bounce("no nonce");
+			$pubkey_hash = sha256(trigger.data.pubkey);
+			if (!var['key_' || trigger.data.owner || '_' || $pubkey_hash])
+				bounce("this key is not auhorized to sign for this owner");
+			if (var['nonce_' || $pubkey_hash || '_' || trigger.data.nonce])
+				bounce("this nonce was already used");
+			$full_message_to_sign = $message_to_sign || " with nonce " || trigger.data.nonce;
+			if (!is_valid_sig($full_message_to_sign, trigger.data.pubkey, trigger.data.signature))
+				bounce("invalid signature");
+			trigger.data.owner
+		};
+
+		$write_nonce = () => {
+			if (trigger.data.owner)
+				var['nonce_' || sha256(trigger.data.pubkey) || '_' || trigger.data.nonce] = 1;
+		};
+	}`,
+	messages: {
+		cases: [
+
+			// withdraw funds
+			{
+				if: `{trigger.data.withdraw AND trigger.data.asset AND trigger.data.amount}`,
+				init: `{
+					$owner = $get_owner("withdraw " || trigger.data.amount || " " || trigger.data.asset || " to " || (trigger.data.to OTHERWISE "self"));
+					$to = trigger.data.to OTHERWISE $owner;
+					
+					$base_amount = trigger.output[[asset=base]];
+					$key = 'balance_' || $owner || '_' || trigger.data.asset;
+					$base_key = 'balance_' || $owner || '_base';
+					$fee = (trigger.data.asset == 'base') ? $withdrawal_fee : 0;
+					$balance = var[$key];
+					if (!$balance)
+						bounce("you have no balance in this asset");
+					$amount = $get_amount(trigger.data.amount, $balance - $fee);
+					$required_amount = $amount + $fee;
+					if ($required_amount > $balance)
+						bounce("trying to withdraw more than you have: " || $required_amount || " > " || $balance);
+					$base_minimum = $storage_fee * var['count_' || $to];
+					if ($withdrawal_fee > var[$base_key] + $base_amount - $base_minimum)
+						bounce("not enough bytes to pay the withdrawal fee, please add some bytes first");
+				}`,
+				messages: [
+					{
+						app: 'payment',
+						payload: {
+							asset: "{trigger.data.asset}",
+							outputs: [
+								{address: "{$to}", amount: "{$amount}"}
+							]
+						}
+					},
+					{
+						app: 'state',
+						state: `{
+							var[$key] -= $amount;
+							var[$base_key] += - $withdrawal_fee + $base_amount;
+							$write_nonce();
+						}`
+					}
+				]
+			},
+
+			// transfer balance to another user
+			{
+				if: `{trigger.data.transfer AND trigger.data.to AND trigger.data.asset AND trigger.data.amount}`,
+				init: `{
+					$owner = $get_owner("transfer " || trigger.data.amount || " " || trigger.data.asset || " to " || trigger.data.to);
+
+					$base_amount = trigger.output[[asset=base]];
+					$base_key = 'balance_' || $owner || '_base';
+					if (var[$base_key] + $base_amount < $storage_fee)
+						bounce("need at least " || $storage_fee || " bytes for storage fees");
+
+					$key = 'balance_' || $owner || '_' || trigger.data.asset;
+					$balance = var[$key];
+					if (!$balance)
+						bounce("you have no balance in this asset");
+					
+					$amount = $get_amount(trigger.data.amount, $balance);
+					if ($amount > $balance)
+						bounce("trying to transfer more than you have: " || $balance);
+				}`,
+				messages: [{
+					app: 'state',
+					state: `{
+						var[$key] -= $amount;
+						var['balance_' || trigger.data.to || '_' || trigger.data.asset] += $amount;
+						var[$base_key] += $base_amount - $storage_fee;
+						$write_nonce();
+					}`
+				}]
+			},
+
+			// authorize a new public key to sign transfers and withdrawals
+			{
+				if: `{trigger.data.authorize_key AND trigger.data.pubkey}`,
+				init: `{
+					if (length(trigger.data.pubkey) > 1000)
+						bounce("pubkey is too long");
+				}`,
+				messages: [{
+					app: 'state',
+					state: `{
+						var['key_' || trigger.address || '_' || sha256(trigger.data.pubkey)] = 1;
+						response['message'] = "authorized the key to sign transactions on your behalf";
+					}`
+				}]
+			},
+
+			// revoke a previously authorized public key
+			{
+				if: `{trigger.data.authorize_key AND trigger.data.pubkey}`,
+				init: `{
+					if (length(trigger.data.pubkey) > 1000)
+						bounce("pubkey is too long");
+				}`,
+				messages: [{
+					app: 'state',
+					state: `{
+						var['key_' || trigger.address || '_' || sha256(trigger.data.pubkey)] = false;
+						response['message'] = "revoked the key";
+					}`
+				}]
+			},
+
+			// silently accept coins to multiple recipients
+			{
+				if: `{trigger.data.recipients}`,
+				init: `{
+					$base_amount = trigger.output[[asset=base]];
+					$required_storage_fee = $storage_fee * length(trigger.data.recipients);
+					if ($base_amount < $required_storage_fee)
+						bounce("need at least " || $required_storage_fee || " bytes for storage fees");
+					
+					$totals = {};
+					foreach(trigger.data.recipients, 10, $recipient => {
+						if (!is_integer($recipient.amount) OR $recipient.amount < 0)
+							bounce("bad amount: " || $recipient.amount);
+						if (!is_valid_address($recipient.address))
+							bounce("bad address: " || $recipient.address);
+						if (!trigger.output[[asset=$recipient.asset]])
+							bounce("nothing received in asset " || $recipient.asset);
+						$totals[$recipient.asset] = $totals[$recipient.asset] + $recipient.amount;
+					});
+					foreach($totals, 10, ($asset, $total) => {
+						if ($total != trigger.output[[asset=$asset]]){
+							// allow to send more than the sum of recipients if the sum is too small
+							if ($asset == 'base' AND $total < $required_storage_fee)
+								return;
+							bounce("expected " || $total || " for asset " || $asset);
+						}
+					});
+					// if we receive more assets than is mentioned in recipients, we silently eat them
+
+				}`,
+				messages: [{
+					app: 'state',
+					state: `{
+						foreach(trigger.data.recipients, 10, $recipient => {
+							$asset_key = 'balance_' || $recipient.address || '_' || $recipient.asset;
+							if (!exists(var[$asset_key]))
+								var['count_' || $recipient.address] += 1;
+							var[$asset_key] += $recipient.amount;
+						});
+					}`
+				}]
+			},
+
+			// silently accept coins
+			{
+				messages: [{
+					app: 'state',
+					state: `{
+						$asset = trigger.output[[asset!=base]].asset;
+						if ($asset == 'ambiguous')
+							bounce('ambiguous asset');
+						
+						$to = trigger.data.to OTHERWISE trigger.address;
+
+						$base_amount = trigger.output[[asset=base]];
+						if ($base_amount < $storage_fee)
+							bounce("need at least " || $storage_fee || " bytes for storage fees");
+						$base_key = 'balance_' || $to || '_base';
+						var[$base_key] += $base_amount;
+						$response_base = $base_amount || ' bytes\n';
+
+						if ($asset != 'none'){
+							$asset_key = 'balance_' || $to || '_' || $asset;
+							if (!exists(var[$asset_key]))
+								var['count_' || $to] += 1;
+							var[$asset_key] += trigger.output[[asset=$asset]];
+							$response_asset = trigger.output[[asset=$asset]] || ' of ' || $asset || '\n';
+						}
+						response['message'] = 'accepted coins:\n' || ($response_base otherwise '') || ($response_asset otherwise '');
+					}`
+				}]
+			},
+		]
+	}
+}
