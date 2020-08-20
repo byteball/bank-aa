@@ -125,6 +125,53 @@
 				]
 			},
 
+			// withdraw funds to multiple recipients
+			{
+				if: `{trigger.data.withdraw AND trigger.data.recipients}`,
+				init: `{
+					$owner = trigger.address;
+					if (!is_array(trigger.data.recipients))
+						bounce("recipients must be array");
+					if (length(trigger.data.recipients) > 5)
+						bounce("too many recipients, max 5");
+					$fee = $withdrawal_fee * length(trigger.data.recipients);
+					$totals = { base: $fee };
+					foreach(trigger.data.recipients, 5, $recipient => {
+						if (!is_integer($recipient.amount) OR $recipient.amount < 0)
+							bounce("bad amount: " || $recipient.amount);
+						if (!is_valid_address($recipient.address))
+							bounce("bad address: " || $recipient.address);
+						if ($recipient.is_aa)
+							bounce("is_aa not allowed here");
+						$totals[$recipient.asset] = $totals[$recipient.asset] + $recipient.amount;
+					});
+					foreach($totals, 5, ($asset, $total) => {
+						$balance = var['balance_' || $owner || '_' || $asset];
+						if (!$balance)
+							bounce("you have no balance in " || $asset);
+						if ($total > $balance)
+							bounce("not enough balance in " || $asset);
+					});
+					$res = $get_payment_messages(trigger.data.recipients);
+					$payment_messages = $res.payment_messages;
+				}`,
+				messages: [
+					`{$payment_messages[0] OTHERWISE ''}`,
+					`{$payment_messages[1] OTHERWISE ''}`,
+					`{$payment_messages[2] OTHERWISE ''}`,
+					`{$payment_messages[3] OTHERWISE ''}`,
+					`{$payment_messages[4] OTHERWISE ''}`,
+					{
+						app: 'state',
+						state: `{
+							foreach($totals, 5, ($asset, $total) => {
+								var['balance_' || $owner || '_' || $asset] -= $total;
+							});
+						}`
+					}
+				]
+			},
+
 			// transfer balance to another user
 			{
 				if: `{trigger.data.transfer AND trigger.data.to AND trigger.data.asset AND trigger.data.amount}`,
