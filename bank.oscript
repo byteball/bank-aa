@@ -157,6 +157,7 @@
 
 					$data = trigger.data;
 					delete($data, 'recipients');
+					delete($data, 'withdraw');
 				}`,
 				messages: [
 					`{$payment_messages[0] OTHERWISE ''}`,
