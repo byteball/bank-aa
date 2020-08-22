@@ -154,6 +154,9 @@
 					});
 					$res = $get_payment_messages(trigger.data.recipients);
 					$payment_messages = $res.payment_messages;
+
+					$data = trigger.data;
+					delete($data, 'recipients');
 				}`,
 				messages: [
 					`{$payment_messages[0] OTHERWISE ''}`,
@@ -161,6 +164,11 @@
 					`{$payment_messages[2] OTHERWISE ''}`,
 					`{$payment_messages[3] OTHERWISE ''}`,
 					`{$payment_messages[4] OTHERWISE ''}`,
+					{
+						if: `{length($data) > 0}`,
+						app: 'data',
+						payload: `{$data}`
+					},
 					{
 						app: 'state',
 						state: `{
