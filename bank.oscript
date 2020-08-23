@@ -7,7 +7,7 @@
 			$buffer_recipients = [];
 			$payment_messages = [];
 			foreach($payments, 5, $payment => {
-				if ($payment.amount == 0)
+				if (!$payment.amount)
 					return;
 				if ($payment.is_aa){
 					delete($payment, 'is_aa');
