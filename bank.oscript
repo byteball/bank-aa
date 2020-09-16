@@ -2,6 +2,10 @@
 	doc_url: "https://obyte.org/bank.json",
 	getters: `{
 
+		$get_balance = ($address, $asset) => {
+			var['balance_' || $address || '_' || $asset] OTHERWISE 0
+		};
+
 		$get_payment_messages = ($payments) => {
 			$payment_messages_by_asset = {};
 			$buffer_recipients = [];
